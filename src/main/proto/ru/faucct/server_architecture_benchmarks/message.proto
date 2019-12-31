@@ -1,0 +1,5 @@
+option java_package = "ru.faucct.server_architecture_benchmarks";
+
+message Message {
+    repeated int32 array = 1;
+}
