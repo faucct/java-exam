@@ -1,6 +1,7 @@
 package ru.faucct.server_architecture_benchmarks;
 
 import java.util.Arrays;
+import java.util.stream.LongStream;
 
 public class FixedRequestsNumberClientMetrics implements ClientMetrics {
     private final long[] requestDurations;
@@ -14,26 +15,26 @@ public class FixedRequestsNumberClientMetrics implements ClientMetrics {
 
     @Override
     public void received() {
-        assert processingDurations[index] == 0;
-        processingDurations[index] = -System.nanoTime();
-    }
-
-    @Override
-    public void processing() {
         assert requestDurations[index] == 0;
         requestDurations[index] = -System.nanoTime();
     }
 
     @Override
+    public void processing() {
+        assert processingDurations[index] == 0;
+        processingDurations[index] = -System.nanoTime();
+    }
+
+    @Override
     public void processed() {
-        assert requestDurations[index] < 0;
-        requestDurations[index] += System.nanoTime();
+        assert processingDurations[index] < 0;
+        processingDurations[index] += System.nanoTime();
     }
 
     @Override
     public void responded() {
-        assert processingDurations[index] < 0;
-        processingDurations[index] += System.nanoTime();
+        assert requestDurations[index] < 0;
+        requestDurations[index] += System.nanoTime();
         index++;
     }
 
@@ -41,7 +42,20 @@ public class FixedRequestsNumberClientMetrics implements ClientMetrics {
         return Arrays.copyOf(requestDurations, requestDurations.length);
     }
 
+    public double averageRequestDuration() {
+        return LongStream.of(requestDurations).summaryStatistics().getAverage();
+    }
+
     public long[] processingDurations() {
         return Arrays.copyOf(processingDurations, processingDurations.length);
+    }
+
+    public double averageProcessingDuration() {
+        return LongStream.of(processingDurations).summaryStatistics().getAverage();
+    }
+
+    @Override
+    public String toString() {
+        return String.valueOf(index);
     }
 }

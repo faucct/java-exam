@@ -1,11 +1,12 @@
 package ru.faucct.server_architecture_benchmarks;
 
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.function.Supplier;
 
-public class ThreadPerClientServer implements AutoCloseable {
+public class ThreadPerClientServer implements Server {
     private final ServerSocket serverSocket;
     private final Thread thread;
     private boolean closed;
@@ -56,5 +57,10 @@ public class ThreadPerClientServer implements AutoCloseable {
         closed = true;
         serverSocket.close();
         thread.join();
+    }
+
+    @Override
+    public int port() {
+        return serverSocket.getLocalPort();
     }
 }

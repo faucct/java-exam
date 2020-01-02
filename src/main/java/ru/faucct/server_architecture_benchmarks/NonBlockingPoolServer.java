@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-public class NonBlockingPoolServer implements AutoCloseable {
+public class NonBlockingPoolServer implements Server {
     private final ServerSocketChannel serverSocket;
     private final ExecutorService processingPool;
     private final Selector readSelector;
@@ -18,6 +18,11 @@ public class NonBlockingPoolServer implements AutoCloseable {
     private final ConcurrentLinkedQueue<Attachment>
             writeQueue = new ConcurrentLinkedQueue<>(), readQueue = new ConcurrentLinkedQueue<>();
     private volatile boolean closed = false;
+
+    @Override
+    public int port() throws IOException {
+        return ((InetSocketAddress) serverSocket.getLocalAddress()).getPort();
+    }
 
     static class Attachment {
         final SocketChannel socketChannel;
@@ -47,8 +52,8 @@ public class NonBlockingPoolServer implements AutoCloseable {
         readSelector = Selector.open();
         writeSelector = Selector.open();
         writer = new Thread(() -> {
-            while (!closed) {
-                try {
+            try {
+                while (!closed) {
                     writeSelector.select();
                     for (SelectionKey selectedKey : writeSelector.selectedKeys()) {
                         final SocketChannel channel = (SocketChannel) selectedKey.channel();
@@ -68,9 +73,12 @@ public class NonBlockingPoolServer implements AutoCloseable {
                         final Attachment attachment = writeQueue.poll();
                         attachment.socketChannel.register(writeSelector, SelectionKey.OP_WRITE, attachment);
                     }
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
                 }
+                for (SelectionKey key : writeSelector.keys()) {
+                    key.channel().close();
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
         });
         writer.start();

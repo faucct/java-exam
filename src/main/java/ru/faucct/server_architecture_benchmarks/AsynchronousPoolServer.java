@@ -3,12 +3,13 @@ package ru.faucct.server_architecture_benchmarks;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
-public class AsynchronousPoolServer implements AutoCloseable {
+public class AsynchronousPoolServer implements Server {
     private final AsynchronousServerSocketChannel serverSocket;
     private boolean closed = false;
 
@@ -32,8 +33,14 @@ public class AsynchronousPoolServer implements AutoCloseable {
 
                     @Override
                     public void completed(Integer result, Void attachment) {
-                        if (result < 0)
+                        if (result < 0) {
+                            try {
+                                channel.close();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
                             return;
+                        }
                         if (header.hasRemaining()) {
                             channel.read(header, null, this);
                             return;
@@ -49,6 +56,11 @@ public class AsynchronousPoolServer implements AutoCloseable {
 
                     @Override
                     public void failed(Throwable exc, Void attachment) {
+                        try {
+                            channel.close();
+                        } catch (IOException e) {
+                            exc.addSuppressed(e);
+                        }
                         throw new RuntimeException(exc);
                     }
 
@@ -105,6 +117,11 @@ public class AsynchronousPoolServer implements AutoCloseable {
 
                         @Override
                         public void failed(Throwable exc, Void attachment) {
+                            try {
+                                channel.close();
+                            } catch (IOException e) {
+                                exc.addSuppressed(e);
+                            }
                             throw new RuntimeException(exc);
                         }
                     };
@@ -114,6 +131,11 @@ public class AsynchronousPoolServer implements AutoCloseable {
 
             @Override
             public void failed(Throwable exc, Void ignored) {
+                try {
+                    serverSocket.close();
+                } catch (IOException e) {
+                    exc.addSuppressed(e);
+                }
                 if (!closed)
                     throw new RuntimeException(exc);
             }
@@ -125,5 +147,10 @@ public class AsynchronousPoolServer implements AutoCloseable {
     public void close() throws IOException {
         closed = true;
         serverSocket.close();
+    }
+
+    @Override
+    public int port() throws IOException {
+        return ((InetSocketAddress) serverSocket.getLocalAddress()).getPort();
     }
 }

@@ -4,13 +4,14 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
-public class BlockingPoolServer implements AutoCloseable {
+public class BlockingPoolServer implements Server {
     private final ServerSocket serverSocket;
     private final ExecutorService processingPool;
     private final Thread thread;
@@ -72,9 +73,14 @@ public class BlockingPoolServer implements AutoCloseable {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() throws IOException, InterruptedException {
         closed = true;
         serverSocket.close();
         thread.join();
+    }
+
+    @Override
+    public int port() throws IOException {
+        return serverSocket.getLocalPort();
     }
 }
