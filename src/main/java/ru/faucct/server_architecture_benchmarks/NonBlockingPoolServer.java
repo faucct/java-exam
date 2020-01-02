@@ -1,8 +1,10 @@
 package ru.faucct.server_architecture_benchmarks;
 
 import java.io.*;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -13,14 +15,18 @@ public class NonBlockingPoolServer implements AutoCloseable {
     private final Selector writeSelector;
     private final Thread reader;
     private final Thread writer;
-    private boolean closed = false;
+    private final ConcurrentLinkedQueue<Attachment>
+            writeQueue = new ConcurrentLinkedQueue<>(), readQueue = new ConcurrentLinkedQueue<>();
+    private volatile boolean closed = false;
 
     static class Attachment {
+        final SocketChannel socketChannel;
         final ByteBuffer inputHeader = ByteBuffer.allocate(Integer.BYTES);
         ByteBuffer inputBody, output;
         final ClientMetrics clientMetrics;
 
-        Attachment(ClientMetrics clientMetrics) {
+        Attachment(SocketChannel socketChannel, ClientMetrics clientMetrics) {
+            this.socketChannel = socketChannel;
             this.clientMetrics = clientMetrics;
         }
     }
@@ -52,9 +58,16 @@ public class NonBlockingPoolServer implements AutoCloseable {
                             selectedKey.cancel();
                             attachment.output.clear();
                             attachment.clientMetrics.responded();
+                            readQueue.add(attachment);
+                            readSelector.wakeup();
                         }
                     }
                     writeSelector.selectedKeys().clear();
+                    writeSelector.selectNow();
+                    while (!writeQueue.isEmpty()) {
+                        final Attachment attachment = writeQueue.poll();
+                        attachment.socketChannel.register(writeSelector, SelectionKey.OP_WRITE, attachment);
+                    }
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -68,10 +81,12 @@ public class NonBlockingPoolServer implements AutoCloseable {
                     readSelector.select();
                     for (SelectionKey selectedKey : readSelector.selectedKeys()) {
                         if (selectedKey.isAcceptable()) {
-                            serverSocket.accept().configureBlocking(false).register(
+                            final SocketChannel channel = serverSocket.accept();
+                            channel.configureBlocking(false);
+                            channel.register(
                                     readSelector,
                                     SelectionKey.OP_READ,
-                                    new Attachment(clientMetricsSupplier.get())
+                                    new Attachment(channel, clientMetricsSupplier.get())
                             );
                             readSelector.wakeup();
                         }
@@ -79,7 +94,11 @@ public class NonBlockingPoolServer implements AutoCloseable {
                             final SocketChannel channel = (SocketChannel) selectedKey.channel();
                             final Attachment attachment = (Attachment) selectedKey.attachment();
                             if (attachment.inputHeader.hasRemaining()) {
-                                channel.read(attachment.inputHeader);
+                                if (channel.read(attachment.inputHeader) < 0) {
+                                    selectedKey.cancel();
+                                    selectedKey.channel().close();
+                                    continue;
+                                }
                                 if (attachment.inputHeader.hasRemaining())
                                     continue;
                                 attachment.inputHeader.flip();
@@ -93,11 +112,12 @@ public class NonBlockingPoolServer implements AutoCloseable {
                                 continue;
                             attachment.inputBody.flip();
                             final MessageOuterClass.Message in = MessageOuterClass.Message.parseFrom(
-                                    new ByteArrayInputStream(attachment.inputBody.array())
+                                    new ByteArrayInputStream(attachment.inputBody.array(), 0, attachment.inputBody.limit())
                             );
                             attachment.inputBody.clear();
                             attachment.inputHeader.clear();
                             attachment.clientMetrics.received();
+                            selectedKey.cancel();
                             processingPool.submit(() -> {
                                 attachment.clientMetrics.processing();
                                 final MessageOuterClass.Message out = MessagesProcessor.process(in);
@@ -115,7 +135,7 @@ public class NonBlockingPoolServer implements AutoCloseable {
                                         }
                                     });
                                     attachment.output.flip();
-                                    channel.register(writeSelector, SelectionKey.OP_WRITE, attachment);
+                                    writeQueue.add(attachment);
                                     writeSelector.wakeup();
                                 } catch (IOException e) {
                                     throw new RuntimeException(e);
@@ -124,6 +144,11 @@ public class NonBlockingPoolServer implements AutoCloseable {
                         }
                     }
                     readSelector.selectedKeys().clear();
+                    readSelector.selectNow();
+                    while (!readQueue.isEmpty()) {
+                        final Attachment attachment = readQueue.poll();
+                        attachment.socketChannel.register(readSelector, SelectionKey.OP_READ, attachment);
+                    }
                 }
                 serverSocket.close();
                 for (SelectionKey key : readSelector.keys()) {
