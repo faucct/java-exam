@@ -44,3 +44,13 @@ clean {
 test {
     useJUnitPlatform()
 }
+
+task(application, dependsOn: 'classes', type: JavaExec) {
+    main = 'ru.faucct.server_architecture_benchmarks.Application'
+    classpath = sourceSets.main.runtimeClasspath
+}
+
+task(serversApplication, dependsOn: 'classes', type: JavaExec) {
+    main = 'ru.faucct.server_architecture_benchmarks.ServersApplication'
+    classpath = sourceSets.main.runtimeClasspath
+}
