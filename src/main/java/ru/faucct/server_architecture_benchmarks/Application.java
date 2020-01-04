@@ -3,6 +3,7 @@ package ru.faucct.server_architecture_benchmarks;
 import javax.swing.*;
 import java.awt.*;
 import java.io.*;
+import java.net.Socket;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,6 +12,9 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class Application {
+
+    private final JTextField host;
+
     private class ValueOrRange {
         boolean range;
         int min, max, step = 1;
@@ -110,17 +114,24 @@ public class Application {
     }
 
     Application() {
-        JFrame pane = new JFrame();//creating instance of JFrame
-
+        final JFrame pane = new JFrame();//creating instance of JFrame
         final GridBagLayout layout = new GridBagLayout();
         pane.setLayout(layout);
-        pane.add(new JLabel("Requests number per client"), labelConstraints(0, 0));
+        int row = 0;
+
+        pane.add(new JLabel("Host"), labelConstraints(row, 0));
+        host = new JTextField();
+        pane.add(host, fieldConstraints(row, 1));
+        row++;
+
+        pane.add(new JLabel("Requests number per client"), labelConstraints(row, 0));
         requestsNumberField = new JSpinner(new SpinnerNumberModel(1, 1, null, 1));
-        pane.add(requestsNumberField, fieldConstraints(0, 1));
+        pane.add(requestsNumberField, fieldConstraints(row, 1));
+        row++;
 
         {
             final ButtonGroup architectureGroup = new ButtonGroup();
-            pane.add(new JLabel("Architecture"), labelConstraints(1, 0));
+            pane.add(new JLabel("Architecture"), labelConstraints(row, 0));
             final JPanel fields = new JPanel();
             final GroupLayout fieldsLayout = new GroupLayout(fields);
             fieldsLayout.setHorizontalGroup(fieldsLayout.createSequentialGroup()
@@ -148,46 +159,55 @@ public class Application {
             architectureGroup.add(nonBlockingPoolArchitecture);
             architectureGroup.add(asynchronousPoolArchitecture);
             fields.setLayout(fieldsLayout);
-            pane.add(fields, fieldConstraints(1, 1));
+            pane.add(fields, fieldConstraints(row, 1));
+            row++;
         }
 
         final ButtonGroup variatingParameterGroup = new ButtonGroup();
-        pane.add(new JLabel("Variating parameter"), labelConstraints(2, 0));
+        pane.add(new JLabel("Variating parameter"), labelConstraints(row, 0));
+        row++;
+
         {
             arraySize = new ValueOrRange("Array size", () -> new SpinnerNumberModel(0, 0, null, 1), this::sync);
             variatingParameterGroup.add(arraySize.radioButton);
-            pane.add(arraySize.radioButton, labelConstraints(3, 0));
-            pane.add(arraySize.fields, fieldConstraints(3, 1));
+            pane.add(arraySize.radioButton, labelConstraints(row, 0));
+            pane.add(arraySize.fields, fieldConstraints(row, 1));
+            row++;
         }
         {
             clientsNumber = new ValueOrRange("Clients number", () -> new SpinnerNumberModel(1, 0, null, 1), this::sync);
             variatingParameterGroup.add(clientsNumber.radioButton);
-            pane.add(clientsNumber.radioButton, labelConstraints(4, 0));
-            pane.add(clientsNumber.fields, fieldConstraints(4, 1));
+            pane.add(clientsNumber.radioButton, labelConstraints(row, 0));
+            pane.add(clientsNumber.fields, fieldConstraints(row, 1));
+            row++;
         }
         {
             delayBetweenRequests = new ValueOrRange("Delay between requests (ms)", () -> new SpinnerNumberModel(0, 0, null, 1), this::sync);
             variatingParameterGroup.add(delayBetweenRequests.radioButton);
-            pane.add(delayBetweenRequests.radioButton, labelConstraints(5, 0));
-            pane.add(delayBetweenRequests.fields, fieldConstraints(5, 1));
+            pane.add(delayBetweenRequests.radioButton, labelConstraints(row, 0));
+            pane.add(delayBetweenRequests.fields, fieldConstraints(row, 1));
+            row++;
         }
-        pane.add(runButton, labelConstraints(6, 0));
-        pane.add(progressBar, fieldConstraints(6, 1));
+
+        pane.add(runButton, labelConstraints(row, 0));
+        pane.add(progressBar, fieldConstraints(row, 1));
+        row++;
+
         arraySize.radioButton.setSelected(true);
         asynchronousPoolArchitecture.setSelected(true);
+        host.setText("localhost");
         pane.setVisible(true);
         pane.setSize(600, 400);
         runButton.addActionListener(e -> {
             running = true;
             new Thread(() -> {
-                try {
+                try (final Socket socket = new Socket(host.getText(), 1600)) {
                     final List<Benchmark.Config> configs = benchmarkConfigs(architecture());
                     progressBar.setValue(0);
                     progressBar.setMaximum(configs.size());
                     final List<Benchmark.Result> results = new ArrayList<>();
                     for (Benchmark.Config benchmarkConfig : configs) {
-                        final Benchmark.Result result = new Benchmark(benchmarkConfig).run();
-                        results.add(result);
+                        results.add(new Benchmark(benchmarkConfig).remote(socket));
                         progressBar.setValue(progressBar.getValue() + 1);
                     }
                     final ChartsFrame chartsFrame = new ChartsFrame(results, variatingParameter());

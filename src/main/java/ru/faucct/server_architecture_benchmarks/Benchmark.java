@@ -1,5 +1,7 @@
 package ru.faucct.server_architecture_benchmarks;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -10,6 +12,7 @@ import java.nio.channels.ServerSocketChannel;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
@@ -59,32 +62,12 @@ public class Benchmark {
         this.config = config;
     }
 
-    public Result run() throws InterruptedException, IOException {
+    public Result local() throws InterruptedException, IOException {
         final List<FixedRequestsNumberClientMetrics> clientsMetrics = Stream.generate(() ->
                 new FixedRequestsNumberClientMetrics(config.requestsNumber)
         ).limit(config.clientsNumber).collect(Collectors.toList());
-        try (final Server server = buildServer(clientsMetrics)) {
-            final long[] durations = new long[config.clientsNumber];
-            final List<Thread> threads = IntStream.range(0, config.clientsNumber).mapToObj(clientId -> new Thread(() -> {
-                try (final Socket socket = new Socket("localhost", server.port())) {
-                    final Client client = new Client(socket);
-                    final Random random = new Random();
-                    long start = System.nanoTime();
-                    for (int i = 0; i < config.requestsNumber; i++) {
-                        final Integer[] sorted = client.sort(
-                                random.ints().limit(config.arraySize).boxed().toArray(Integer[]::new)
-                        );
-                        assert config.arraySize == sorted.length;
-                        parkNanos(config.delayNanoseconds);
-                    }
-                    durations[clientId] = System.nanoTime() - start;
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
-                }
-            }, "client" + clientId)).peek(Thread::start).collect(Collectors.toList());
-            for (Thread thread : threads) {
-                thread.join();
-            }
+        try (final Server server = buildServer(clientsMetrics.iterator()::next)) {
+            final long[] durations = clientDurations(server.port());
             return new Result(
                     config,
                     clientsMetrics.stream().mapToDouble(FixedRequestsNumberClientMetrics::averageRequestDuration).summaryStatistics().getAverage(),
@@ -94,23 +77,62 @@ public class Benchmark {
         }
     }
 
-    private Server buildServer(List<FixedRequestsNumberClientMetrics> clientsMetrics) throws IOException {
+    public Result remote(Socket socket) throws IOException, InterruptedException {
+        final DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+        final DataInputStream input = new DataInputStream(socket.getInputStream());
+        output.writeInt(config.architecture.ordinal());
+        final long[] durations = clientDurations(input.readInt());
+        output.writeByte(0);
+        return new Result(
+                config,
+                input.readDouble(),
+                input.readDouble(),
+                LongStream.of(durations).summaryStatistics().getAverage() / config.requestsNumber
+        );
+    }
+
+    private long[] clientDurations(int port) throws InterruptedException {
+        final long[] durations = new long[config.clientsNumber];
+        final List<Thread> threads = IntStream.range(0, config.clientsNumber).mapToObj(clientId -> new Thread(() -> {
+            try (final Socket socket = new Socket("localhost", port)) {
+                final Client client = new Client(socket);
+                final Random random = new Random();
+                long start = System.nanoTime();
+                for (int i = 0; i < config.requestsNumber; i++) {
+                    final Integer[] sorted = client.sort(
+                            random.ints().limit(config.arraySize).boxed().toArray(Integer[]::new)
+                    );
+                    assert config.arraySize == sorted.length;
+                    parkNanos(config.delayNanoseconds);
+                }
+                durations[clientId] = System.nanoTime() - start;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }, "client" + clientId)).peek(Thread::start).collect(Collectors.toList());
+        for (Thread thread : threads) {
+            thread.join();
+        }
+        return durations;
+    }
+
+    private Server buildServer(Supplier<ClientMetrics> clientMetricsSupplier) throws IOException {
         final int threadPoolSize = Runtime.getRuntime().availableProcessors();
         final int backlog = 1000;
         switch (config.architecture) {
             case ThreadPerClient:
-                return new ThreadPerClientServer(new ServerSocket(0, backlog), clientsMetrics.iterator()::next);
+                return new ThreadPerClientServer(new ServerSocket(0, backlog), clientMetricsSupplier);
             case BlockingPool:
                 return new BlockingPoolServer(
                         new ServerSocket(0, backlog),
                         Executors.newFixedThreadPool(threadPoolSize),
-                        clientsMetrics.iterator()::next
+                        clientMetricsSupplier
                 );
             case NonBlockingPool:
                 return new NonBlockingPoolServer(
                         ServerSocketChannel.open().bind(new InetSocketAddress(0), backlog),
                         Executors.newFixedThreadPool(threadPoolSize),
-                        clientsMetrics.iterator()::next
+                        clientMetricsSupplier
                 );
             case Asynchronous:
                 return new AsynchronousPoolServer(
@@ -118,7 +140,7 @@ public class Benchmark {
                                 threadPoolSize,
                                 Executors.defaultThreadFactory()
                         )).bind(new InetSocketAddress(0), backlog),
-                        clientsMetrics.iterator()::next
+                        clientMetricsSupplier
                 );
             default:
                 throw new RuntimeException(config.architecture.toString());
