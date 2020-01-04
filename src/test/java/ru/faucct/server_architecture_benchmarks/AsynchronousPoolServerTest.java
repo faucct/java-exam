@@ -17,13 +17,10 @@ public class AsynchronousPoolServerTest {
     public void test() throws Exception {
         try (
                 final AsynchronousServerSocketChannel serverChannel = AsynchronousServerSocketChannel
-                        .open(AsynchronousChannelGroup.withFixedThreadPool(
-                                3,
-                                Executors.defaultThreadFactory()
-                        ))
+                        .open()
                         .bind(new InetSocketAddress(0));
                 final AsynchronousPoolServer ignored =
-                        new AsynchronousPoolServer(serverChannel, () -> new FixedRequestsNumberClientMetrics(2));
+                        new AsynchronousPoolServer(serverChannel, Executors.newFixedThreadPool(3), () -> new FixedRequestsNumberClientMetrics(2));
                 final Socket socket = new Socket("localhost", ((InetSocketAddress) serverChannel.getLocalAddress()).getPort())
         ) {
             writeRequest(socket, 3, 2, 4);

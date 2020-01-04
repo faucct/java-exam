@@ -136,10 +136,8 @@ public class Benchmark {
                 );
             case Asynchronous:
                 return new AsynchronousPoolServer(
-                        AsynchronousServerSocketChannel.open(AsynchronousChannelGroup.withFixedThreadPool(
-                                threadPoolSize,
-                                Executors.defaultThreadFactory()
-                        )).bind(new InetSocketAddress(0), backlog),
+                        AsynchronousServerSocketChannel.open().bind(new InetSocketAddress(0), backlog),
+                        Executors.newFixedThreadPool(threadPoolSize),
                         clientMetricsSupplier
                 );
             default:
