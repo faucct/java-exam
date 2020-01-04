@@ -67,7 +67,7 @@ public class Benchmark {
                 new FixedRequestsNumberClientMetrics(config.requestsNumber)
         ).limit(config.clientsNumber).collect(Collectors.toList());
         try (final Server server = buildServer(clientsMetrics.iterator()::next)) {
-            final long[] durations = clientDurations(server.port());
+            final long[] durations = clientDurations("localhost", server.port());
             return new Result(
                     config,
                     clientsMetrics.stream().mapToDouble(FixedRequestsNumberClientMetrics::averageRequestDuration).summaryStatistics().getAverage(),
@@ -81,7 +81,7 @@ public class Benchmark {
         final DataOutputStream output = new DataOutputStream(socket.getOutputStream());
         final DataInputStream input = new DataInputStream(socket.getInputStream());
         output.writeInt(config.architecture.ordinal());
-        final long[] durations = clientDurations(input.readInt());
+        final long[] durations = clientDurations(socket.getInetAddress().getHostAddress(), input.readInt());
         output.writeByte(0);
         return new Result(
                 config,
@@ -91,10 +91,10 @@ public class Benchmark {
         );
     }
 
-    private long[] clientDurations(int port) throws InterruptedException {
+    private long[] clientDurations(String host, int port) throws InterruptedException {
         final long[] durations = new long[config.clientsNumber];
         final List<Thread> threads = IntStream.range(0, config.clientsNumber).mapToObj(clientId -> new Thread(() -> {
-            try (final Socket socket = new Socket("localhost", port)) {
+            try (final Socket socket = new Socket(host, port)) {
                 final Client client = new Client(socket);
                 final Random random = new Random();
                 long start = System.nanoTime();
