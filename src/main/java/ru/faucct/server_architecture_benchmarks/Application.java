@@ -212,7 +212,7 @@ public class Application {
                     }
                     final ChartsFrame chartsFrame = new ChartsFrame(results, variatingParameter());
                     chartsFrame.setTitle(chartsTitleArchitecture() + ". " + chartsTitleFixedParameters());
-                    final File directory = new File(LocalDateTime.now().toString());
+                    final File directory = new File(new File("output"), LocalDateTime.now().toString());
                     directory.mkdir();
                     chartsFrame.save(directory);
                     try (final FileWriter output = new FileWriter(new File(directory, "results.tsv"))) {
