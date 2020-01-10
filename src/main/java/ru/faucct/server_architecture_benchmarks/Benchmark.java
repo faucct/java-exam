@@ -105,7 +105,7 @@ public class Benchmark {
                     assert config.arraySize == sorted.length;
                     parkNanos(config.delayNanoseconds);
                 }
-                durations[clientId] = System.nanoTime() - start;
+                durations[clientId] = System.nanoTime() - start - config.delayNanoseconds * config.requestsNumber;
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
